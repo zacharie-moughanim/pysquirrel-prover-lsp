@@ -2,11 +2,21 @@ from typing import Any
 import sys
 import time
 import json
+import subprocess
+import time
+
+squirrelPath = "squirrel" # TODO
+
+DEBUG_MODE : bool = True
 
 def send(data : str, end : str | None = "\n") -> None :
-  """ Sends data to client (via pipe on stdout/stdin) see [print] for a description of the parameters. """
+  """ Sends data to LSP client (via pipe on stdout/stdin) see [print] for a description of the parameters. """
   print(data)
   sys.stdout.flush()
+
+def LSPAnswerQuery(id : Any, msg : str) -> None :
+  """ Sends string message [msg] to LSP client as answer to the query identified by [id]. """
+  send(json.dumps({"id": id, "payload": msg}), end="")
 
 def remove_trailing_nl_cr(s : str) -> str :
   if s[-1] == '\n' :
@@ -56,8 +66,34 @@ def LSPRecv() -> dict[Any, Any] :
   assert(isinstance(parsed_payload, dict))
   return parsed_payload
 
-send("TEST", end="")
+squirrelInputIndicator : str = "[>  "
+
+data = LSPRecv()
+if DEBUG_MODE :
+  send(json.dumps({"method":"vsquirrel/debug", "data":str(data)}), end="")
+if "pathToSquirrel" in data :
+  if DEBUG_MODE :
+    send(json.dumps({"method":"vsquirrel/debug", "data":f"path to squirrel received!{data["pathToSquirrel"]}"}), end="")
+  squirrelPath = data["pathToSquirrel"]
+
+last_id_request : int = data["id"]
+
+squirrelInstance = subprocess.Popen([squirrelPath, "-i"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 while True :
+  buf = ''
+  while len(buf) < len(squirrelInputIndicator) or buf[-len(squirrelInputIndicator):] != squirrelInputIndicator :
+    buf += squirrelInstance.stdout.read(1).decode()
+  LSPAnswerQuery(last_id_request, buf)
   data = LSPRecv()
-  send(str(data), end="")
+  if "proofCommand" not in data :
+    send(json.dumps({"method":"vsquirrel/error", "data":"No proof command in request"}), end="")
+  else :
+    proofCommand = data["proofCommand"]
+    assert(isinstance(proofCommand, str))
+    if proofCommand != "" :
+      squirrelInstance.stdin.write((proofCommand + "\n").encode())
+      squirrelInstance.stdin.flush()
+  last_id_request = data["id"]
+
+# TODO replace send by LSPSend
