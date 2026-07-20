@@ -79,7 +79,7 @@ while True :
   buf : bytes = b""
   squirrelIsWaitingForInput : bool = False
   while not(squirrelIsWaitingForInput) :
-    buf += squirrelInstance.stdout.read(1) # .decode()
+    buf += squirrelInstance.stdout.read(1)
     if len(buf) >= len(squirrelInputIndicator) :
       try :
         lastChunk = buf[-len(squirrelInputIndicator):].decode()
@@ -97,5 +97,3 @@ while True :
       squirrelInstance.stdin.write((proofCommand + "\n").encode())
       squirrelInstance.stdin.flush()
   last_id_request = data["id"]
-
-# TODO replace send by LSPSend
