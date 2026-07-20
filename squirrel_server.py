@@ -3,7 +3,6 @@ import sys
 import time
 import json
 import subprocess
-import time
 
 squirrelPath = "squirrel" # TODO
 
@@ -14,9 +13,12 @@ def send(data : str, end : str | None = "\n") -> None :
   print(data)
   sys.stdout.flush()
 
-def LSPAnswerQuery(id : Any, msg : str) -> None :
+def LSPAnswerQuery(id : Any, msg : str, method : str | None = None) -> None :
   """ Sends string message [msg] to LSP client as answer to the query identified by [id]. """
-  send(json.dumps({"id": id, "payload": msg}), end="")
+  if method is None :
+    send(json.dumps({"id": id, "payload": msg}), end="")
+  else :
+    send(json.dumps({"id": id, "payload": msg, "method": method}), end="")
 
 def remove_trailing_nl_cr(s : str) -> str :
   if s[-1] == '\n' :
@@ -92,7 +94,7 @@ while True :
       except UnicodeDecodeError :
         squirrelIsWaitingForInput = False
   # Sending to LSP client the output of squirrel.
-  LSPAnswerQuery(last_id_request, buf.decode())
+  LSPAnswerQuery(last_id_request, buf[:-len(squirrelInputIndicator)].decode(), method = "vsquirrel/squirrelOutput")
   # Waiting for LSP client's request (e.g. a proof command to process)
   data = LSPRecv()
   if "proofCommand" not in data :
