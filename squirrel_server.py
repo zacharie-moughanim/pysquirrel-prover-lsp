@@ -33,14 +33,8 @@ def recv() -> str :
   return remove_trailing_nl_cr(sys.stdin.readline())
 
 def recv_until(n : int) -> str :
-  """ Receives data line by line until there are exactly [n] bytes received. """
-  n_bytes_recvd : int = 0
-  data : str = ""
-  while n_bytes_recvd < n :
-    line = sys.stdin.readline()
-    n_bytes_recvd += len(line)
-    data += remove_trailing_nl_cr(line)
-  return data
+  """ Receives data until there are exactly [n] bytes received. """
+  return sys.stdin.read(n)
 
 def LSPRecv() -> dict[Any, Any] :
   """ Receives a LSP request, returns a dictionary containg the JSON received. """
@@ -55,9 +49,9 @@ def LSPRecv() -> dict[Any, Any] :
       reading_header = False
     else :
       hline_split = hline.split(":")
-      if hline_split[0] == 'Content-Length' :
+      if hline_split[0].casefold() == 'Content-Length'.casefold() :
         content_length = int(hline_split[1])
-  # Reading body
+  # Reading payload
   if content_length < 0 :
     sys.stderr.write("No field Content-Length in request header.")
     raise ValueError
@@ -78,13 +72,21 @@ if "pathToSquirrel" in data :
 
 last_id_request : int = data["id"]
 
+# TODO error management, display message "maybe wrong path to squirrel"
 squirrelInstance = subprocess.Popen([squirrelPath, "-i"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 while True :
-  buf = ''
-  while len(buf) < len(squirrelInputIndicator) or buf[-len(squirrelInputIndicator):] != squirrelInputIndicator :
-    buf += squirrelInstance.stdout.read(1).decode()
-  LSPAnswerQuery(last_id_request, buf)
+  buf : bytes = b""
+  squirrelIsWaitingForInput : bool = False
+  while not(squirrelIsWaitingForInput) :
+    buf += squirrelInstance.stdout.read(1) # .decode()
+    if len(buf) >= len(squirrelInputIndicator) :
+      try :
+        lastChunk = buf[-len(squirrelInputIndicator):].decode()
+        squirrelIsWaitingForInput = (lastChunk == squirrelInputIndicator)
+      except UnicodeDecodeError :
+        squirrelIsWaitingForInput = False
+  LSPAnswerQuery(last_id_request, buf.decode())
   data = LSPRecv()
   if "proofCommand" not in data :
     send(json.dumps({"method":"vsquirrel/error", "data":"No proof command in request"}), end="")
