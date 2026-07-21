@@ -10,8 +10,13 @@ DEBUG_MODE : bool = True
 
 def send(data : str, end : str | None = "\n") -> None :
   """ Sends data to LSP client (via pipe on stdout/stdin) see [print] for a description of the parameters. """
-  print(data)
+  sys.stdout.write(data)
   sys.stdout.flush()
+
+def senderr(dataJSON : dict) -> None :
+  """ Sends data to LSP client (via pipe on stderr). """
+  sys.stderr.write(json.dumps(dataJSON))
+  sys.stderr.flush()
 
 def LSPAnswerQuery(id : Any, msg : str, method : str | None = None, kind : str | None = None) -> None :
   """ Sends string message [msg] to LSP client as answer to the query identified by [id]. """
@@ -55,7 +60,7 @@ def LSPRecv() -> dict[Any, Any] :
         content_length = int(hline_split[1])
   # Reading payload
   if content_length < 0 :
-    sys.stderr.write("No field Content-Length in request header.")
+    senderr({"method": "vsquirrel/debug", "data": "No field Content-Length in request header."})
     raise ValueError
   payload : str = recv_until(content_length)
   parsed_payload = json.loads(payload)
@@ -74,14 +79,13 @@ squirrelErrorIndicator : str = "[error>"
 ANSIEscape : str = "\u001b".casefold()
 
 # TODO multiple sessions
-
+senderr({"method":"vsquirrel/debug", "data":"waiting"})
 # First waiting for a message indicating the beginning of a proof session, containing the path to squirrel.
 data = LSPRecv()
-if DEBUG_MODE :
-  send(json.dumps({"method":"vsquirrel/debug", "data":str(data)}), end="")
+senderr({"method":"vsquirrel/debug", "data":"aaaaaaaaaaaaaaaaaaaaaaaahhhhhhhhhhhhhhhhhhhhhhhhhhhh"})
 if "pathToSquirrel" in data :
   if DEBUG_MODE :
-    send(json.dumps({"method":"vsquirrel/debug", "data":f"path to squirrel received!{data["pathToSquirrel"]}"}), end="")
+    senderr({"method":"vsquirrel/debug", "data":f"path to squirrel received!{data["pathToSquirrel"]}"})
   squirrelPath = data["pathToSquirrel"]
 
 # Keeping track of last id of a request to answer following the LSP
@@ -103,6 +107,8 @@ while True :
         squirrelIsWaitingForInput = (lastChunk == squirrelInputIndicator)
       except UnicodeDecodeError :
         squirrelIsWaitingForInput = False
+  if DEBUG_MODE :
+    senderr({"method": "vsquirrel/debug", "data": "Finished reading squirrel's output."})
   squirrelOutputContent : str = buf.decode()
   # Deciding the kind of output: error or output
   squirrelMessageBeginningIndex : int = 0
@@ -111,23 +117,27 @@ while True :
   if squirrelOutputContent[:len(ANSIEscape)].casefold() == ANSIEscape :
     squirrelMessageBeginningIndex += len(ANSIEscape)
     if squirrelOutputContent[squirrelMessageBeginningIndex] != '[' :
-      send(json.dumps({"method": "vsquirrel/lsperror", "data": "Invalid ANSI character in Squirrel's output."}), end="")
+      senderr({"method": "vsquirrel/lsperror", "data": "Invalid ANSI character in Squirrel's output."})
     squirrelMessageBeginningIndex += 1
     while squirrelOutputContent[squirrelMessageBeginningIndex] != 'm' and squirrelMessageBeginningIndex < len(squirrelOutputContent) :
       squirrelMessageBeginningIndex += 1
     squirrelMessageBeginningIndex += 1
     if squirrelMessageBeginningIndex >= len(squirrelOutputContent) :
       squirrelMessageBeginningIndex = 0
-      send(json.dumps({"method": "vsquirrel/lsperror", "data": "Invalid ANSI character in Squirrel's output."}), end="")
+      senderr({"method": "vsquirrel/lsperror", "data": "Invalid ANSI character in Squirrel's output."})
   # TODO here parse more smartly the output description
   if squirrelOutputContent[squirrelMessageBeginningIndex:squirrelMessageBeginningIndex + len(squirrelErrorIndicator)] == squirrelErrorIndicator :
     outputKind = "error"
   # Sending to LSP client the output of squirrel.
+  if DEBUG_MODE :
+    senderr({"method": "vsquirrel/debug", "data": "Sending..."})
   LSPAnswerQuery(last_id_request, squirrelOutputContent[:-len(squirrelInputIndicator)], method = "vsquirrel/squirrelProofOutput", kind = outputKind)
+  if DEBUG_MODE :
+    senderr({"method": "vsquirrel/debug", "data": "Sent."})
   # Waiting for LSP client's request (e.g. a proof command to process)
   data = LSPRecv()
   if "proofCommand" not in data :
-    send(json.dumps({"method": "vsquirrel/lsperror", "data": "No proof command in request"}), end="")
+    senderr({"method": "vsquirrel/lsperror", "data": "No proof command in request"})
   else :
     proofCommand = data["proofCommand"]
     assert(isinstance(proofCommand, str))
