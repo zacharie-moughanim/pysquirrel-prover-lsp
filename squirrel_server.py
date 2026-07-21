@@ -13,12 +13,14 @@ def send(data : str, end : str | None = "\n") -> None :
   print(data)
   sys.stdout.flush()
 
-def LSPAnswerQuery(id : Any, msg : str, method : str | None = None) -> None :
+def LSPAnswerQuery(id : Any, msg : str, method : str | None = None, kind : str | None = None) -> None :
   """ Sends string message [msg] to LSP client as answer to the query identified by [id]. """
-  if method is None :
-    send(json.dumps({"id": id, "payload": msg}), end="")
-  else :
-    send(json.dumps({"id": id, "payload": msg, "method": method}), end="")
+  data : dict[str, Any] = {"id": id, "payload": msg}
+  if method is not None :
+    data["method"] = method
+  if kind is not None :
+    data["kind"] = kind
+  send(json.dumps(data), end="")
 
 def remove_trailing_nl_cr(s : str) -> str :
   if s[-1] == '\n' :
@@ -60,8 +62,16 @@ def LSPRecv() -> dict[Any, Any] :
   assert(isinstance(parsed_payload, dict))
   return parsed_payload
 
+# What I understand of squirrel's interactive mode syntax:
+# TODO take it fully into account: everything except [goal] should appear at the bottom-right of the screen.
+# [kind>Sigma*<] : kind message with e.g. kind=start/warning/goal
+# [error>Sigma* : error message
+# [> Indicates that it's waiting for user input
+
 # The string output by squirrel in interactive mode that we interpret as "Squirrel is waiting for input"
 squirrelInputIndicator : str = "[>  "
+squirrelErrorIndicator : str = "[error>"
+ANSIEscape : str = "\u001b".casefold()
 
 # TODO multiple sessions
 
@@ -93,12 +103,31 @@ while True :
         squirrelIsWaitingForInput = (lastChunk == squirrelInputIndicator)
       except UnicodeDecodeError :
         squirrelIsWaitingForInput = False
+  squirrelOutputContent : str = buf.decode()
+  # Deciding the kind of output: error or output
+  squirrelMessageBeginningIndex : int = 0
+  outputKind : str = "output"
+  # Eliminating ANSI starting character, if any
+  if squirrelOutputContent[:len(ANSIEscape)].casefold() == ANSIEscape :
+    squirrelMessageBeginningIndex += len(ANSIEscape)
+    if squirrelOutputContent[squirrelMessageBeginningIndex] != '[' :
+      send(json.dumps({"method": "vsquirrel/lsperror", "data": "Invalid ANSI character in Squirrel's output."}), end="")
+    squirrelMessageBeginningIndex += 1
+    while squirrelOutputContent[squirrelMessageBeginningIndex] != 'm' and squirrelMessageBeginningIndex < len(squirrelOutputContent) :
+      squirrelMessageBeginningIndex += 1
+    squirrelMessageBeginningIndex += 1
+    if squirrelMessageBeginningIndex >= len(squirrelOutputContent) :
+      squirrelMessageBeginningIndex = 0
+      send(json.dumps({"method": "vsquirrel/lsperror", "data": "Invalid ANSI character in Squirrel's output."}), end="")
+  # TODO here parse more smartly the output description
+  if squirrelOutputContent[squirrelMessageBeginningIndex:squirrelMessageBeginningIndex + len(squirrelErrorIndicator)] == squirrelErrorIndicator :
+    outputKind = "error"
   # Sending to LSP client the output of squirrel.
-  LSPAnswerQuery(last_id_request, buf[:-len(squirrelInputIndicator)].decode(), method = "vsquirrel/squirrelOutput")
+  LSPAnswerQuery(last_id_request, squirrelOutputContent[:-len(squirrelInputIndicator)], method = "vsquirrel/squirrelProofOutput", kind = outputKind)
   # Waiting for LSP client's request (e.g. a proof command to process)
   data = LSPRecv()
   if "proofCommand" not in data :
-    send(json.dumps({"method":"vsquirrel/error", "data":"No proof command in request"}), end="")
+    send(json.dumps({"method": "vsquirrel/lsperror", "data": "No proof command in request"}), end="")
   else :
     proofCommand = data["proofCommand"]
     assert(isinstance(proofCommand, str))
