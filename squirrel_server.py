@@ -145,7 +145,7 @@ while True :
   LSPAnswerQuery(last_id_request, squirrelOutputContent[:-len(squirrelInputIndicator)], method = "vsquirrel/squirrelProofOutput", kind = outputKind)
   # Waiting for LSP client's request (e.g. a proof command to process)
   data = LSPRecv()
-  if "proofCommand" not in data :
+  if "proofCommand" not in data : # TODO add other possible behavior like "quit" to stop this session of squirrel.
     senderr({"method": "vsquirrel/lsperror", "data": "No proof command in request"})
   else :
     proofCommand = data["proofCommand"]
