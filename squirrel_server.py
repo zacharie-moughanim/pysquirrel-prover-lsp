@@ -9,13 +9,26 @@ squirrelPath = "squirrel" # TODO
 DEBUG_MODE : bool = True
 
 def send(data : str, end : str | None = "\n") -> None :
-  """ Sends data to LSP client (via pipe on stdout/stdin) see [print] for a description of the parameters. """
-  sys.stdout.write(data)
+  """ Sends data to LSP client (via pipe on stdout/stdin). """
+  utf8Data = (data + end).encode(encoding="utf-8")
+  # Computing LSP header
+  size = len(utf8Data)
+  contentLengthHeaderField = f"Content-Length: {size}\r\n"
+  header = contentLengthHeaderField
+  # Sending
+  sys.stdout.buffer.write((header + "\r\n").encode(encoding="utf-8") + utf8Data)
   sys.stdout.flush()
 
-def senderr(dataJSON : dict) -> None :
+def senderr(dataJSON : dict, end : str | None = "\n") -> None : 
   """ Sends data to LSP client (via pipe on stderr). """
-  sys.stderr.write(json.dumps(dataJSON))
+  data : str = (json.dumps(dataJSON) + end)
+  utf8Data = data.encode(encoding="utf-8")
+  # Computing LSP header
+  size = len(utf8Data)
+  contentLengthHeaderField = f"Content-Length: {size}\r\n"
+  header = contentLengthHeaderField
+  # Sending
+  sys.stderr.buffer.write((header + "\r\n").encode(encoding="utf-8") + utf8Data)
   sys.stderr.flush()
 
 def LSPAnswerQuery(id : Any, msg : str, method : str | None = None, kind : str | None = None) -> None :
@@ -25,7 +38,7 @@ def LSPAnswerQuery(id : Any, msg : str, method : str | None = None, kind : str |
     data["method"] = method
   if kind is not None :
     data["kind"] = kind
-  send(json.dumps(data), end="")
+  send(json.dumps(data))
 
 def remove_trailing_nl_cr(s : str) -> str :
   if s[-1] == '\n' :
@@ -79,10 +92,9 @@ squirrelErrorIndicator : str = "[error>"
 ANSIEscape : str = "\u001b".casefold()
 
 # TODO multiple sessions
-senderr({"method":"vsquirrel/debug", "data":"waiting"})
 # First waiting for a message indicating the beginning of a proof session, containing the path to squirrel.
 data = LSPRecv()
-senderr({"method":"vsquirrel/debug", "data":"aaaaaaaaaaaaaaaaaaaaaaaahhhhhhhhhhhhhhhhhhhhhhhhhhhh"})
+senderr({"method":"erqwsqgsrdg", "data":"waiting"})
 if "pathToSquirrel" in data :
   if DEBUG_MODE :
     senderr({"method":"vsquirrel/debug", "data":f"path to squirrel received!{data["pathToSquirrel"]}"})
@@ -132,8 +144,8 @@ while True :
   if DEBUG_MODE :
     senderr({"method": "vsquirrel/debug", "data": "Sending..."})
   LSPAnswerQuery(last_id_request, squirrelOutputContent[:-len(squirrelInputIndicator)], method = "vsquirrel/squirrelProofOutput", kind = outputKind)
-  if DEBUG_MODE :
-    senderr({"method": "vsquirrel/debug", "data": "Sent."})
+  # if DEBUG_MODE :
+  #   senderr({"method": "vsquirrel/debug", "data": "Sent."})
   # Waiting for LSP client's request (e.g. a proof command to process)
   data = LSPRecv()
   if "proofCommand" not in data :
