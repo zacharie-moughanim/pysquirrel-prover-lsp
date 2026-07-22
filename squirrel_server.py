@@ -94,10 +94,11 @@ ANSIEscape : str = "\u001b".casefold()
 # TODO multiple sessions
 # First waiting for a message indicating the beginning of a proof session, containing the path to squirrel.
 data = LSPRecv()
-senderr({"method":"erqwsqgsrdg", "data":"waiting"})
+# if DEBUG_MODE :
+#   senderr({"method":"vsquirrel/debug", "data":"waiting"})
 if "pathToSquirrel" in data :
-  if DEBUG_MODE :
-    senderr({"method":"vsquirrel/debug", "data":f"path to squirrel received!{data["pathToSquirrel"]}"})
+  # if DEBUG_MODE :
+  #   senderr({"method":"vsquirrel/debug", "data":f"path to squirrel received!{data["pathToSquirrel"]}"})
   squirrelPath = data["pathToSquirrel"]
 
 # Keeping track of last id of a request to answer following the LSP
@@ -119,8 +120,8 @@ while True :
         squirrelIsWaitingForInput = (lastChunk == squirrelInputIndicator)
       except UnicodeDecodeError :
         squirrelIsWaitingForInput = False
-  if DEBUG_MODE :
-    senderr({"method": "vsquirrel/debug", "data": "Finished reading squirrel's output."})
+  # if DEBUG_MODE :
+  #   senderr({"method": "vsquirrel/debug", "data": "Finished reading squirrel's output."})
   squirrelOutputContent : str = buf.decode()
   # Deciding the kind of output: error or output
   squirrelMessageBeginningIndex : int = 0
@@ -141,11 +142,7 @@ while True :
   if squirrelOutputContent[squirrelMessageBeginningIndex:squirrelMessageBeginningIndex + len(squirrelErrorIndicator)] == squirrelErrorIndicator :
     outputKind = "error"
   # Sending to LSP client the output of squirrel.
-  if DEBUG_MODE :
-    senderr({"method": "vsquirrel/debug", "data": "Sending..."})
   LSPAnswerQuery(last_id_request, squirrelOutputContent[:-len(squirrelInputIndicator)], method = "vsquirrel/squirrelProofOutput", kind = outputKind)
-  # if DEBUG_MODE :
-  #   senderr({"method": "vsquirrel/debug", "data": "Sent."})
   # Waiting for LSP client's request (e.g. a proof command to process)
   data = LSPRecv()
   if "proofCommand" not in data :
