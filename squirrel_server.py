@@ -8,8 +8,13 @@ squirrelPath = "squirrel"
 
 DEBUG_MODE : bool = True
 
+## COMMUNICATION WITH LSP CLIENT
+
 def send(data : str, end : str | None = "\n") -> None :
   """ Sends data to LSP client (via pipe on stdout/stdin). """
+  if end == None :
+    end = ""
+  assert(isinstance(end, str))
   utf8Data = (data + end).encode(encoding="utf-8")
   # Computing LSP header
   size = len(utf8Data)
@@ -21,6 +26,9 @@ def send(data : str, end : str | None = "\n") -> None :
 
 def senderr(dataJSON : dict, end : str | None = "\n") -> None : 
   """ Sends data to LSP client (via pipe on stderr). """
+  if end == None :
+    end = ""
+  assert(isinstance(end, str))
   data : str = (json.dumps(dataJSON) + end)
   utf8Data = data.encode(encoding="utf-8")
   # Computing LSP header
@@ -31,9 +39,9 @@ def senderr(dataJSON : dict, end : str | None = "\n") -> None :
   sys.stderr.buffer.write((header + "\r\n").encode(encoding="utf-8") + utf8Data)
   sys.stderr.flush()
 
-def LSPAnswerQuery(id : Any, msg : str, method : str | None = None, kind : str | None = None) -> None :
+def LSPAnswerQuery(id : Any, msg : str, documentId : str, method : str | None = None, kind : str | None = None) -> None :
   """ Sends string message [msg] to LSP client as answer to the query identified by [id]. """
-  data : dict[str, Any] = {"id": id, "payload": msg}
+  data : dict[str, Any] = {"id": id, "documentId": documentId, "payload": msg}
   if method is not None :
     data["method"] = method
   if kind is not None :
@@ -80,55 +88,83 @@ def LSPRecv() -> dict[Any, Any] :
   assert(isinstance(parsed_payload, dict))
   return parsed_payload
 
+## SQUIRREL'S OUTPUT MANAGEMENT
+
 # What I understand of squirrel's interactive mode syntax:
 # TODO take it fully into account: everything except [goal] should appear at the bottom-right of the screen.
-# [kind>Sigma*<] : kind message with e.g. kind=start/warning/goal
+# [kind>Sigma*<] : kind message with e.g. kind=start/warning
+# [goal>Sigma* : goal message
 # [error>Sigma* : error message
 # [> Indicates that it's waiting for user input
+# <] seems to indicate the end of a block, allowing to have multiple kind of messages in a single output.
 
 # The string output by squirrel in interactive mode that we interpret as "Squirrel is waiting for input"
 squirrelInputIndicator : str = "[>  "
 squirrelErrorIndicator : str = "[error>"
 ANSIEscape : str = "\u001b".casefold()
 
-def transmitSquirrelOutput(id : int) :
-  # Loading squirrel's output until [squirrelInputIndicator] is output by squirrel.
-  buf : bytes = b""
-  squirrelIsWaitingForInput : bool = False
-  while not(squirrelIsWaitingForInput) :
-    buf += squirrelInstance.stdout.read(1)
-    if len(buf) >= len(squirrelInputIndicator) :
-      try :
-        lastChunk = buf[-len(squirrelInputIndicator):].decode()
-        squirrelIsWaitingForInput = (lastChunk == squirrelInputIndicator)
-      except UnicodeDecodeError :
-        squirrelIsWaitingForInput = False
-  # if DEBUG_MODE :
-  #   senderr({"method": "vsquirrel/debug", "data": "Finished reading squirrel's output."})
-  squirrelOutputContent : str = buf.decode()
-  # Deciding the kind of output: error or output
-  squirrelMessageBeginningIndex : int = 0
-  outputKind : str = "output"
-  # Eliminating ANSI starting character, if any
-  if squirrelOutputContent[:len(ANSIEscape)].casefold() == ANSIEscape :
-    squirrelMessageBeginningIndex += len(ANSIEscape)
-    if squirrelOutputContent[squirrelMessageBeginningIndex] != '[' :
-      senderr({"method": "vsquirrel/lsperror", "data": "Invalid ANSI character in Squirrel's output."})
-    squirrelMessageBeginningIndex += 1
-    while squirrelOutputContent[squirrelMessageBeginningIndex] != 'm' and squirrelMessageBeginningIndex < len(squirrelOutputContent) :
+
+## MANAGING PROOFS STATE
+
+class ProofState :
+  squirrelPath : str
+  documentId : str
+  squirrelInstance : subprocess.Popen
+
+  def __init__(self, documentId : str, squirrelPath : str = "squirrel") :
+    self.documentId = documentId
+    self.squirrelPath = squirrelPath
+    self.squirrelInstance = subprocess.Popen([squirrelPath, "-i"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    # TODO error management on Popen
+
+  def processCommand(self, cmd : bytes) :
+    assert self.squirrelInstance.stdin is not None
+    self.squirrelInstance.stdin.write(cmd)
+    self.squirrelInstance.stdin.flush()
+
+  def transmitSquirrelOutput(self, id : int) :
+    """ Read all squirrel's output until squirrel waits for input, and send it to LSP client. """
+    # Loading squirrel's output until [squirrelInputIndicator] is output by squirrel.
+    buf : bytes = b""
+    squirrelIsWaitingForInput : bool = False
+    while not(squirrelIsWaitingForInput) :
+      assert self.squirrelInstance.stdout is not None
+      buf += self.squirrelInstance.stdout.read(1)
+      if len(buf) >= len(squirrelInputIndicator) :
+        try :
+          lastChunk = buf[-len(squirrelInputIndicator):].decode()
+          squirrelIsWaitingForInput = (lastChunk == squirrelInputIndicator)
+        except UnicodeDecodeError :
+          squirrelIsWaitingForInput = False
+    # if DEBUG_MODE :
+    #   senderr({"method": "vsquirrel/debug", "data": "Finished reading squirrel's output."})
+    squirrelOutputContent : str = buf.decode()
+    # Deciding the kind of output: error or output
+    squirrelMessageBeginningIndex : int = 0
+    outputKind : str = "output"
+    # Eliminating ANSI starting character, if any
+    if squirrelOutputContent[:len(ANSIEscape)].casefold() == ANSIEscape :
+      squirrelMessageBeginningIndex += len(ANSIEscape)
+      if squirrelOutputContent[squirrelMessageBeginningIndex] != '[' :
+        senderr({"method": "vsquirrel/lsperror", "data": "Invalid ANSI character in Squirrel's output."})
       squirrelMessageBeginningIndex += 1
-    squirrelMessageBeginningIndex += 1
-    if squirrelMessageBeginningIndex >= len(squirrelOutputContent) :
-      squirrelMessageBeginningIndex = 0
-      senderr({"method": "vsquirrel/lsperror", "data": "Invalid ANSI character in Squirrel's output."})
-  # TODO here parse more smartly the output description
-  if squirrelOutputContent[squirrelMessageBeginningIndex:squirrelMessageBeginningIndex + len(squirrelErrorIndicator)] == squirrelErrorIndicator :
-    outputKind = "error"
-  # Sending to LSP client the output of squirrel.
-  LSPAnswerQuery(last_id_request, squirrelOutputContent[:-len(squirrelInputIndicator)], method = "vsquirrel/squirrelProofOutput", kind = outputKind)
+      while squirrelOutputContent[squirrelMessageBeginningIndex] != 'm' and squirrelMessageBeginningIndex < len(squirrelOutputContent) :
+        squirrelMessageBeginningIndex += 1
+      squirrelMessageBeginningIndex += 1
+      if squirrelMessageBeginningIndex >= len(squirrelOutputContent) :
+        squirrelMessageBeginningIndex = 0
+        senderr({"method": "vsquirrel/lsperror", "data": "Invalid ANSI character in Squirrel's output."})
+    # TODO here parse more smartly the output description
+    if squirrelOutputContent[squirrelMessageBeginningIndex:squirrelMessageBeginningIndex + len(squirrelErrorIndicator)] == squirrelErrorIndicator :
+      outputKind = "error"
+    # Sending to LSP client the output of squirrel.
+    LSPAnswerQuery(id, squirrelOutputContent[:-len(squirrelInputIndicator)], self.documentId, method = "vsquirrel/squirrelProofOutput", kind = outputKind)
+  
+proofStates : dict[str, ProofState] = {}
 
+## LSP SERVER ROUTINE
 
-while True :
+def mainRoutine() -> None :
   data = LSPRecv()
   if "method" not in data :
     senderr({"method": "vsquirrel/lsperror", "data": "No method field in message."})
@@ -139,27 +175,47 @@ while True :
       if "pathToSquirrel" not in data :
         senderr({"method": "vsquirrel/lsperror", "data": "No path to squirrel received, defaulting to \"squirrel\"."})
       else :
-        if DEBUG_MODE :
-          senderr({"method":"vsquirrel/debug", "data":f"path to squirrel received!{data["pathToSquirrel"]}"})
+        # if DEBUG_MODE :
+        #   senderr({"method":"vsquirrel/debug", "data":f"path to squirrel received!{data["pathToSquirrel"]}"})
         squirrelPath = data["pathToSquirrel"]
-      last_id_request : int = data["id"]
+      request_id : int = data["id"]
       # TODO error management, display message "maybe wrong path to squirrel"
       # Spawning a squirrel instance
-      squirrelInstance = subprocess.Popen([squirrelPath, "-i"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-      transmitSquirrelOutput(last_id_request)
+      if "documentId" not in data :
+        senderr({"method": "vsquirrel/lsperror", "data": "No document id received, proof is not started."})
+      else :
+        documentId = data["documentId"]
+        newProofState = ProofState(documentId, squirrelPath)
+        proofStates[documentId] = newProofState
+        newProofState.transmitSquirrelOutput(request_id)
+    elif data["method"] == "vsquirrel/closeProof" :
+      if "documentId" not in data :
+        senderr({"method": "vsquirrel/lsperror", "data": "No document id received, proof is not closed."})
+      else :
+        documentId = data["documentId"]
+        proofStates[documentId].squirrelInstance.kill() # There may be a cleaner way to close the instance
+        proofStates.pop(documentId)
     elif data["method"] == "vsquirrel/proofCommand" :
       # Sending proof command to squirrel
       if "proofCommand" not in data :
         senderr({"method": "vsquirrel/lsperror", "data": "No proof command in vsquirrel/proofCommand request."})
       else :
-        proofCommand = data["proofCommand"]
-        assert(isinstance(proofCommand, str))
-        if proofCommand != "" :
-          # Executing proofCommand in squirrel
-          squirrelInstance.stdin.write((proofCommand + "\n").encode())
-          squirrelInstance.stdin.flush()
-      if "id" not in data :
-        senderr({"method": "vsquirrel/lsperror", "data": "No id in vsquirrel/proofCommand request."})
-      else :
-        last_id_request = data["id"] # TODO wrap in a state dictionary
-      transmitSquirrelOutput(last_id_request)
+        if "documentId" not in data :
+          senderr({"method": "vsquirrel/lsperror", "data": "No document id in vsquirrel/proofCommand request, command is not processed."})
+        else :
+          documentId = data["documentId"]
+          proofCommand = data["proofCommand"]
+          proofState = proofStates[documentId]
+          assert(isinstance(proofCommand, str))
+          if proofCommand != "" :
+            # Executing proofCommand in squirrel
+            proofState.processCommand((proofCommand + "\n").encode())
+            request_id = -1
+            if "id" not in data :
+              senderr({"method": "vsquirrel/lsperror", "data": "No id in vsquirrel/proofCommand request."})
+            else :
+              request_id = data["id"] # TODO wrap in a state dictionary
+            proofState.transmitSquirrelOutput(request_id)
+
+while True :
+  mainRoutine()
