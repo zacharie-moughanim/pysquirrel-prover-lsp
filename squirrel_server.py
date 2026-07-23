@@ -4,7 +4,7 @@ import time
 import json
 import subprocess
 
-squirrelPath = "squirrel" # TODO
+squirrelPath = "squirrel"
 
 DEBUG_MODE : bool = True
 
@@ -91,24 +91,7 @@ squirrelInputIndicator : str = "[>  "
 squirrelErrorIndicator : str = "[error>"
 ANSIEscape : str = "\u001b".casefold()
 
-# TODO multiple sessions
-# First waiting for a message indicating the beginning of a proof session, containing the path to squirrel.
-data = LSPRecv()
-# if DEBUG_MODE :
-#   senderr({"method":"vsquirrel/debug", "data":"waiting"})
-if "pathToSquirrel" in data :
-  # if DEBUG_MODE :
-  #   senderr({"method":"vsquirrel/debug", "data":f"path to squirrel received!{data["pathToSquirrel"]}"})
-  squirrelPath = data["pathToSquirrel"]
-
-# Keeping track of last id of a request to answer following the LSP
-last_id_request : int = data["id"]
-
-# TODO error management, display message "maybe wrong path to squirrel"
-# Spawning a squirrel instance
-squirrelInstance = subprocess.Popen([squirrelPath, "-i"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-while True :
+def transmitSquirrelOutput(id : int) :
   # Loading squirrel's output until [squirrelInputIndicator] is output by squirrel.
   buf : bytes = b""
   squirrelIsWaitingForInput : bool = False
@@ -143,15 +126,40 @@ while True :
     outputKind = "error"
   # Sending to LSP client the output of squirrel.
   LSPAnswerQuery(last_id_request, squirrelOutputContent[:-len(squirrelInputIndicator)], method = "vsquirrel/squirrelProofOutput", kind = outputKind)
-  # Waiting for LSP client's request (e.g. a proof command to process)
+
+
+while True :
   data = LSPRecv()
-  if "proofCommand" not in data : # TODO add other possible behavior like "quit" to stop this session of squirrel.
-    senderr({"method": "vsquirrel/lsperror", "data": "No proof command in request"})
+  if "method" not in data :
+    senderr({"method": "vsquirrel/lsperror", "data": "No method field in message."})
   else :
-    proofCommand = data["proofCommand"]
-    assert(isinstance(proofCommand, str))
-    if proofCommand != "" :
-      # Executing proofCommand in squirrel
-      squirrelInstance.stdin.write((proofCommand + "\n").encode())
-      squirrelInstance.stdin.flush()
-  last_id_request = data["id"]
+    if data["method"] == "vsquirrel/startProof" :
+      # if DEBUG_MODE :
+      #   senderr({"method":"vsquirrel/debug", "data":"waiting"})
+      if "pathToSquirrel" not in data :
+        senderr({"method": "vsquirrel/lsperror", "data": "No path to squirrel received, defaulting to \"squirrel\"."})
+      else :
+        if DEBUG_MODE :
+          senderr({"method":"vsquirrel/debug", "data":f"path to squirrel received!{data["pathToSquirrel"]}"})
+        squirrelPath = data["pathToSquirrel"]
+      last_id_request : int = data["id"]
+      # TODO error management, display message "maybe wrong path to squirrel"
+      # Spawning a squirrel instance
+      squirrelInstance = subprocess.Popen([squirrelPath, "-i"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+      transmitSquirrelOutput(last_id_request)
+    elif data["method"] == "vsquirrel/proofCommand" :
+      # Sending proof command to squirrel
+      if "proofCommand" not in data :
+        senderr({"method": "vsquirrel/lsperror", "data": "No proof command in vsquirrel/proofCommand request."})
+      else :
+        proofCommand = data["proofCommand"]
+        assert(isinstance(proofCommand, str))
+        if proofCommand != "" :
+          # Executing proofCommand in squirrel
+          squirrelInstance.stdin.write((proofCommand + "\n").encode())
+          squirrelInstance.stdin.flush()
+      if "id" not in data :
+        senderr({"method": "vsquirrel/lsperror", "data": "No id in vsquirrel/proofCommand request."})
+      else :
+        last_id_request = data["id"] # TODO wrap in a state dictionary
+      transmitSquirrelOutput(last_id_request)
