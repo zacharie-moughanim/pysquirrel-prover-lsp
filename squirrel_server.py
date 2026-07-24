@@ -39,13 +39,19 @@ def senderr(dataJSON : dict, end : str | None = "\n") -> None :
   sys.stderr.buffer.write((header + "\r\n").encode(encoding="utf-8") + utf8Data)
   sys.stderr.flush()
 
-def LSPAnswerQuery(id : Any, msg : str, documentId : str, method : str | None = None, kind : str | None = None) -> None :
+def LSPAnswerQuery(id : Any, msg : str, documentId : str, method : str | None = None, kind : str | None = None, resetResponses : bool = True, continuing : bool = False, commandFailed : bool = False) -> None :
   """ Sends string message [msg] to LSP client as answer to the query identified by [id]. """
   data : dict[str, Any] = {"id": id, "documentId": documentId, "payload": msg}
   if method is not None :
     data["method"] = method
   if kind is not None :
     data["kind"] = kind
+  if resetResponses :
+    data["resetResponses"] = "1"
+  if continuing :
+    data["continuing"] = "1"
+  if commandFailed :
+    data["commandFailed"] = "1"
   send(json.dumps(data))
 
 def remove_trailing_nl_cr(s : str) -> str :
@@ -90,19 +96,93 @@ def LSPRecv() -> dict[Any, Any] :
 
 ## SQUIRREL'S OUTPUT MANAGEMENT
 
-# What I understand of squirrel's interactive mode syntax:
-# TODO take it fully into account: everything except [goal] should appear at the bottom-right of the screen.
-# [kind>Sigma*<] : kind message with e.g. kind=start/warning
-# [goal>Sigma* : goal message
-# [error>Sigma* : error message
-# [> Indicates that it's waiting for user input
-# <] seems to indicate the end of a block, allowing to have multiple kind of messages in a single output.
-
 # The string output by squirrel in interactive mode that we interpret as "Squirrel is waiting for input"
 squirrelInputIndicator : str = "[>  "
 squirrelErrorIndicator : str = "[error>"
 ANSIEscape : str = "\u001b".casefold()
 
+squirrelOutputKinds = ["error", "warning", "goal", "start"]
+squirrelOutputBlockBeginnings = ['[' + kind + '>' for kind in squirrelOutputKinds]
+
+# What I understand of squirrel's interactive mode syntax:
+# TODO take it fully into account: everything except [goal] should appear at the bottom-right of the screen.
+# [kind>Sigma* : kind message with e.g. kind=start/warning/goal/error
+# [> Indicates that it's waiting for user input
+# <] seems to indicate the end of a block, allowing to have multiple kind of messages in a single output.
+
+def parseSquirrelOutput(squirrelOutputContent : str) -> list[tuple[str, str]] :
+  """ Parses `squirrelOutputContent`. This string must end with a `squirrelInputIndicator`.
+    The syntax parsed is the following:
+    "[kind>" with `kind` a valid squirrel output kind starts a block;
+    "<]" ends a block
+    `squirrelInputIndicator` also ends a block
+    Returns a list of blocks present in output, in the form (kind, payload). """
+  res = []
+  i : int = 0
+  curBlockKind : str | None = None # None correspond to being outside a block
+  buf : str = ""
+  while i < len(squirrelOutputContent) :
+    if curBlockKind is None :
+      # Detecting the start of a new block
+      if squirrelOutputContent[i] == '[' :
+        for j, blockBegin in enumerate(squirrelOutputBlockBeginnings) :
+          if squirrelOutputContent[i:i + len(blockBegin)] == blockBegin :
+            i = i + len(blockBegin)
+            withinBlock = True
+            curBlockKind = squirrelOutputKinds[j] # The corresponding without the leading [ and the trailing >
+            if buf.strip() != "" :
+              res.append(("response", buf))
+            buf = ""
+            break
+        else :
+          buf += squirrelOutputContent[i]
+          i += 1
+      else :
+        buf += squirrelOutputContent[i]
+        i += 1
+    else :
+      # Detecting the start of a new block
+      if squirrelOutputContent[i] == '[' :
+        for j, blockBegin in enumerate(squirrelOutputBlockBeginnings) :
+          if squirrelOutputContent[i:i + len(blockBegin)] == blockBegin :
+            i = i + len(blockBegin)
+            if buf.strip() != "" :
+              res.append((curBlockKind, buf))
+            withinBlock = True
+            curBlockKind = squirrelOutputKinds[j] # The corresponding without the leading [ and the trailing >
+            buf = ""
+            break
+        else :
+          buf += squirrelOutputContent[i]
+          i += 1
+      # Detecting the end of current block
+      elif i + 1 < len(squirrelOutputContent) and squirrelOutputContent[i:i + 2] == "<]" :
+        i += 2
+        res.append((curBlockKind, buf))
+        buf = ""
+        curBlockKind = None
+      elif i < len(squirrelOutputContent) :
+        buf += squirrelOutputContent[i]
+        i += 1
+  # Removing squirrel's input indicator from last response
+  lastKind : str | None
+  if curBlockKind is not None :
+    lastKind = curBlockKind
+  else :
+    lastKind = "response"
+  lastPayload = buf[:-len(squirrelInputIndicator)]
+  # if lastPayload[:len(ANSIEscape)] == ANSIEscape :
+  #   i = len(ANSIEscape)
+  #   if lastPayload[i] == '[' :
+  #     i += 1
+  #     while i < len(lastPayload) and lastPayload[i] != "m" :
+  #       senderr({"method": "vsquirrel/debug", "data": "HEY"})
+  #       i += 1
+  #     if i == len(lastPayload) - 1 :
+  #       lastPayload = None
+  if lastPayload is not None :
+    res.append((lastKind, lastPayload))
+  return res
 
 ## MANAGING PROOFS STATE
 
@@ -139,26 +219,20 @@ class ProofState :
     # if DEBUG_MODE :
     #   senderr({"method": "vsquirrel/debug", "data": "Finished reading squirrel's output."})
     squirrelOutputContent : str = buf.decode()
-    # Deciding the kind of output: error or output
-    squirrelMessageBeginningIndex : int = 0
-    outputKind : str = "output"
-    # Eliminating ANSI starting character, if any
-    if squirrelOutputContent[:len(ANSIEscape)].casefold() == ANSIEscape :
-      squirrelMessageBeginningIndex += len(ANSIEscape)
-      if squirrelOutputContent[squirrelMessageBeginningIndex] != '[' :
-        senderr({"method": "vsquirrel/lsperror", "data": "Invalid ANSI character in Squirrel's output."})
-      squirrelMessageBeginningIndex += 1
-      while squirrelOutputContent[squirrelMessageBeginningIndex] != 'm' and squirrelMessageBeginningIndex < len(squirrelOutputContent) :
-        squirrelMessageBeginningIndex += 1
-      squirrelMessageBeginningIndex += 1
-      if squirrelMessageBeginningIndex >= len(squirrelOutputContent) :
-        squirrelMessageBeginningIndex = 0
-        senderr({"method": "vsquirrel/lsperror", "data": "Invalid ANSI character in Squirrel's output."})
-    # TODO here parse more smartly the output description
-    if squirrelOutputContent[squirrelMessageBeginningIndex:squirrelMessageBeginningIndex + len(squirrelErrorIndicator)] == squirrelErrorIndicator :
-      outputKind = "error"
-    # Sending to LSP client the output of squirrel.
-    LSPAnswerQuery(id, squirrelOutputContent[:-len(squirrelInputIndicator)], self.documentId, method = "vsquirrel/squirrelProofOutput", kind = outputKind)
+    parsedOutput = parseSquirrelOutput(squirrelOutputContent)
+    # Determining whether the command failed or not
+    commandFailed : bool = ("error" in [x for (x, y) in parsedOutput])
+    # Sending to LSP client the output of squirrel, resetting answers only on first message.
+    for j, (kind, payload) in enumerate(parsedOutput) :
+      LSPAnswerQuery(
+        id, payload,
+        self.documentId,
+        method = "vsquirrel/squirrelProofOutput",
+        kind = kind,
+        resetResponses = (j == 0),
+        continuing = (j < len(parsedOutput) - 1),
+        commandFailed = commandFailed
+      )
   
 proofStates : dict[str, ProofState] = {}
 
