@@ -1,6 +1,12 @@
-# pysquirrel-prover-lsp
-A LSP server for Squirrel proof assistant, written in Python.
+# PySquirrel-prover-LSP
 
-# Known Issues & Roadmap
-- Only support one file at a time.
-- Not in a loop; cannot start another proof without restarting the server...
+A LSP server for [Squirrel proof assistant](https://squirrel-prover.github.io/), written in Python.
+
+# Features
+
+This is basically a wrapper around `squirrel`'s interactive mode, the main purpose of this server is to prove files rather than commands in the CLI of `squirrel`'s interactive mode.
+
+PySquirrel-prover-LSP allows ongoing proofs on multiple files. Each file is managed in a separate instance of `squirrel`.
+
+# Known Issues
+- 
