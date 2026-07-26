@@ -9,4 +9,4 @@ This is basically a wrapper around `squirrel`'s interactive mode, the main purpo
 PySquirrel-prover-LSP allows ongoing proofs on multiple files. Each file is managed in a separate instance of `squirrel`.
 
 # Known Issues
-- 
+- `admit` and `Abort` are not highlighted, they appear just as `Qed`.
