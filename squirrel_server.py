@@ -190,11 +190,16 @@ class ProofState :
   squirrelPath : str
   documentId : str
   squirrelInstance : subprocess.Popen
+  failedSquirrelStartup : bool
 
   def __init__(self, documentId : str, squirrelPath : str = "squirrel") :
     self.documentId = documentId
     self.squirrelPath = squirrelPath
-    self.squirrelInstance = subprocess.Popen([squirrelPath, "-i"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try :
+      self.squirrelInstance = subprocess.Popen([squirrelPath, "-i"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+      self.failedSquirrelStartup = False    
+    except :
+      self.failedSquirrelStartup = True
     # TODO error management on Popen
 
   def processCommand(self, cmd : bytes) :
@@ -223,13 +228,22 @@ class ProofState :
     # Determining whether the command failed or not
     commandFailed : bool = ("error" in [x for (x, y) in parsedOutput])
     # Sending to LSP client the output of squirrel, resetting answers only on first message.
+    encounteredGoal : bool = False
+    encounteredOther : bool = False
     for j, (kind, payload) in enumerate(parsedOutput) :
+      resetResponses : bool = False
+      if kind == "goal" and not(encounteredGoal) :
+        resetResponses = True
+        encounteredGoal = True
+      if kind != "goal" and not(encounteredOther) :
+        resetResponses = True
+        encounteredOther = True
       LSPAnswerQuery(
         id, payload,
         self.documentId,
         method = "vsquirrel/squirrelProofOutput",
         kind = kind,
-        resetResponses = (j == 0),
+        resetResponses = resetResponses,
         continuing = (j < len(parsedOutput) - 1),
         commandFailed = commandFailed
       )
@@ -250,7 +264,7 @@ def mainRoutine() -> None :
         senderr({"method": "vsquirrel/lsperror", "data": "No path to squirrel received, defaulting to \"squirrel\"."})
       else :
         # if DEBUG_MODE :
-        #   senderr({"method":"vsquirrel/debug", "data":f"path to squirrel received!{data["pathToSquirrel"]}"})
+        #   senderr({"method":"vsquirrel/debug", "data":f"path to squirrel received! \"{data["pathToSquirrel"]}\""})
         squirrelPath = data["pathToSquirrel"]
       request_id : int = data["id"]
       # TODO error management, display message "maybe wrong path to squirrel"
@@ -260,15 +274,21 @@ def mainRoutine() -> None :
       else :
         documentId = data["documentId"]
         newProofState = ProofState(documentId, squirrelPath)
-        proofStates[documentId] = newProofState
-        newProofState.transmitSquirrelOutput(request_id)
+        if newProofState.failedSquirrelStartup :
+          senderr({"method": "vsquirrel/lsperror", "failStartup": documentId, "data": "failed squirrel's startup, did you correctly configure squirrel's path ?"})
+        else :
+          proofStates[documentId] = newProofState
+          newProofState.transmitSquirrelOutput(request_id)
     elif data["method"] == "vsquirrel/closeProof" :
       if "documentId" not in data :
         senderr({"method": "vsquirrel/lsperror", "data": "No document id received, proof is not closed."})
       else :
         documentId = data["documentId"]
-        proofStates[documentId].squirrelInstance.kill() # There may be a cleaner way to close the instance
-        proofStates.pop(documentId)
+        if documentId not in proofStates :
+          senderr({"method": "vsquirrel/lsperror", "data": "Attempting to close a proof that wasn't started."})
+        else :
+          proofStates[documentId].squirrelInstance.kill() # There may be a cleaner way to close the instance
+          proofStates.pop(documentId)
     elif data["method"] == "vsquirrel/proofCommand" :
       # Sending proof command to squirrel
       if "proofCommand" not in data :
