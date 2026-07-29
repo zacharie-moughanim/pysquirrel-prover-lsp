@@ -39,7 +39,7 @@ def senderr(dataJSON : dict, end : str | None = "\n") -> None :
   sys.stderr.buffer.write((header + "\r\n").encode(encoding="utf-8") + utf8Data)
   sys.stderr.flush()
 
-def LSPAnswerQuery(id : Any, msg : str, documentId : str, method : str | None = None, kind : str | None = None, resetResponses : bool = True, continuing : bool = False, commandFailed : bool = False) -> None :
+def LSPAnswerQuery(id : Any, msg : str, documentId : str, method : str | None = None, kind : str | None = None, resetResponses : bool = True, continuing : bool = False, commandFailed : bool = False, startSquirrel : bool = False, moveCursor : bool = False) -> None :
   """ Sends string message [msg] to LSP client as answer to the query identified by [id]. """
   data : dict[str, Any] = {"id": id, "documentId": documentId, "payload": msg}
   if method is not None :
@@ -52,6 +52,10 @@ def LSPAnswerQuery(id : Any, msg : str, documentId : str, method : str | None = 
     data["continuing"] = "1"
   if commandFailed :
     data["commandFailed"] = "1"
+  if startSquirrel :
+    data["startSquirrel"] = "1"
+  if moveCursor :
+    data["moveCursor"] = "1"
   send(json.dumps(data))
 
 def remove_trailing_nl_cr(s : str) -> str :
@@ -207,7 +211,7 @@ class ProofState :
     self.squirrelInstance.stdin.write(cmd)
     self.squirrelInstance.stdin.flush()
 
-  def transmitSquirrelOutput(self, id : int) :
+  def transmitSquirrelOutput(self, id : int, startSquirrelTag : bool = False, moveCursor : bool = False) :
     """ Read all squirrel's output until squirrel waits for input, and send it to LSP client. """
     # Loading squirrel's output until [squirrelInputIndicator] is output by squirrel.
     buf : bytes = b""
@@ -245,7 +249,9 @@ class ProofState :
         kind = kind,
         resetResponses = resetResponses,
         continuing = (j < len(parsedOutput) - 1),
-        commandFailed = commandFailed
+        commandFailed = commandFailed,
+        startSquirrel = startSquirrelTag,
+        moveCursor = moveCursor
       )
   
 proofStates : dict[str, ProofState] = {}
@@ -278,7 +284,7 @@ def mainRoutine() -> None :
           senderr({"method": "vsquirrel/lsperror", "failStartup": documentId, "data": "failed squirrel's startup, did you correctly configure squirrel's path ?"})
         else :
           proofStates[documentId] = newProofState
-          newProofState.transmitSquirrelOutput(request_id)
+          newProofState.transmitSquirrelOutput(request_id, startSquirrelTag = True)
     elif data["method"] == "vsquirrel/closeProof" :
       if "documentId" not in data :
         senderr({"method": "vsquirrel/lsperror", "data": "No document id received, proof is not closed."})
@@ -309,7 +315,10 @@ def mainRoutine() -> None :
               senderr({"method": "vsquirrel/lsperror", "data": "No id in vsquirrel/proofCommand request."})
             else :
               request_id = data["id"] # TODO wrap in a state dictionary
-            proofState.transmitSquirrelOutput(request_id)
+            moveCursor : bool = False
+            if "moveCursor" in data :
+              moveCursor = True
+            proofState.transmitSquirrelOutput(request_id, moveCursor = moveCursor)
 
 while True :
   mainRoutine()
