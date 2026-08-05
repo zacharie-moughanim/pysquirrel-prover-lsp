@@ -91,7 +91,7 @@ def LSPRecv() -> dict[Any, Any] :
         content_length = int(hline_split[1])
   # Reading payload
   if content_length < 0 :
-    senderr({"method": "vsquirrel/debug", "data": "No field Content-Length in request header."})
+    senderr({"method": "pysquirrellsp/debug", "data": "No field Content-Length in request header."})
     raise ValueError
   payload : str = recv_until(content_length)
   parsed_payload = json.loads(payload)
@@ -180,7 +180,7 @@ def parseSquirrelOutput(squirrelOutputContent : str) -> list[tuple[str, str]] :
   #   if lastPayload[i] == '[' :
   #     i += 1
   #     while i < len(lastPayload) and lastPayload[i] != "m" :
-  #       senderr({"method": "vsquirrel/debug", "data": "HEY"})
+  #       senderr({"method": "pysquirrellsp/debug", "data": "HEY"})
   #       i += 1
   #     if i == len(lastPayload) - 1 :
   #       lastPayload = None
@@ -226,7 +226,7 @@ class ProofState :
         except UnicodeDecodeError :
           squirrelIsWaitingForInput = False
     # if DEBUG_MODE :
-    #   senderr({"method": "vsquirrel/debug", "data": "Finished reading squirrel's output."})
+    #   senderr({"method": "pysquirrellsp/debug", "data": "Finished reading squirrel's output."})
     squirrelOutputContent : str = buf.decode()
     parsedOutput = parseSquirrelOutput(squirrelOutputContent)
     # Determining whether the command failed or not
@@ -245,7 +245,7 @@ class ProofState :
       LSPAnswerQuery(
         id, payload,
         self.documentId,
-        method = "vsquirrel/squirrelProofOutput",
+        method = "pysquirrellsp/squirrelProofOutput",
         kind = kind,
         resetResponses = resetResponses,
         continuing = (j < len(parsedOutput) - 1),
@@ -261,47 +261,47 @@ proofStates : dict[str, ProofState] = {}
 def mainRoutine() -> None :
   data = LSPRecv()
   if "method" not in data :
-    senderr({"method": "vsquirrel/lsperror", "data": "No method field in message."})
+    senderr({"method": "pysquirrellsp/lsperror", "data": "No method field in message."})
   else :
-    if data["method"] == "vsquirrel/startProof" :
+    if data["method"] == "pysquirrellsp/startProof" :
       # if DEBUG_MODE :
-      #   senderr({"method":"vsquirrel/debug", "data":"waiting"})
+      #   senderr({"method":"pysquirrellsp/debug", "data":"waiting"})
       if "pathToSquirrel" not in data :
-        senderr({"method": "vsquirrel/lsperror", "data": "No path to squirrel received, defaulting to \"squirrel\"."})
+        senderr({"method": "pysquirrellsp/lsperror", "data": "No path to squirrel received, defaulting to \"squirrel\"."})
       else :
         # if DEBUG_MODE :
-        #   senderr({"method":"vsquirrel/debug", "data":f"path to squirrel received! \"{data["pathToSquirrel"]}\""})
+        #   senderr({"method":"pysquirrellsp/debug", "data":f"path to squirrel received! \"{data["pathToSquirrel"]}\""})
         squirrelPath = data["pathToSquirrel"]
       request_id : int = data["id"]
       # TODO error management, display message "maybe wrong path to squirrel"
       # Spawning a squirrel instance
       if "documentId" not in data :
-        senderr({"method": "vsquirrel/lsperror", "data": "No document id received, proof is not started."})
+        senderr({"method": "pysquirrellsp/lsperror", "data": "No document id received, proof is not started."})
       else :
         documentId = data["documentId"]
         newProofState = ProofState(documentId, squirrelPath)
         if newProofState.failedSquirrelStartup :
-          senderr({"method": "vsquirrel/lsperror", "failStartup": documentId, "data": "failed squirrel's startup, did you correctly configure squirrel's path ?"})
+          senderr({"method": "pysquirrellsp/lsperror", "failStartup": documentId, "data": "failed squirrel's startup, did you correctly configure squirrel's path ?"})
         else :
           proofStates[documentId] = newProofState
           newProofState.transmitSquirrelOutput(request_id, startSquirrelTag = True)
-    elif data["method"] == "vsquirrel/closeProof" :
+    elif data["method"] == "pysquirrellsp/closeProof" :
       if "documentId" not in data :
-        senderr({"method": "vsquirrel/lsperror", "data": "No document id received, proof is not closed."})
+        senderr({"method": "pysquirrellsp/lsperror", "data": "No document id received, proof is not closed."})
       else :
         documentId = data["documentId"]
         if documentId not in proofStates :
-          senderr({"method": "vsquirrel/lsperror", "data": "Attempting to close a proof that wasn't started."})
+          senderr({"method": "pysquirrellsp/lsperror", "data": "Attempting to close a proof that wasn't started."})
         else :
           proofStates[documentId].squirrelInstance.kill() # There may be a cleaner way to close the instance
           proofStates.pop(documentId)
-    elif data["method"] == "vsquirrel/proofCommand" :
+    elif data["method"] == "pysquirrellsp/proofCommand" :
       # Sending proof command to squirrel
       if "proofCommand" not in data :
-        senderr({"method": "vsquirrel/lsperror", "data": "No proof command in vsquirrel/proofCommand request."})
+        senderr({"method": "pysquirrellsp/lsperror", "data": "No proof command in pysquirrellsp/proofCommand request."})
       else :
         if "documentId" not in data :
-          senderr({"method": "vsquirrel/lsperror", "data": "No document id in vsquirrel/proofCommand request, command is not processed."})
+          senderr({"method": "pysquirrellsp/lsperror", "data": "No document id in pysquirrellsp/proofCommand request, command is not processed."})
         else :
           documentId = data["documentId"]
           proofCommand = data["proofCommand"]
@@ -312,7 +312,7 @@ def mainRoutine() -> None :
             proofState.processCommand((proofCommand + "\n").encode())
             request_id = -1
             if "id" not in data :
-              senderr({"method": "vsquirrel/lsperror", "data": "No id in vsquirrel/proofCommand request."})
+              senderr({"method": "pysquirrellsp/lsperror", "data": "No id in pysquirrellsp/proofCommand request."})
             else :
               request_id = data["id"] # TODO wrap in a state dictionary
             moveCursor : bool = False
