@@ -15,11 +15,13 @@ The server supports the following requests:
   - (★) `id`: a unique identifier for the request (the LSP answers to this command with this `id`).
   - (★) `documentId`: an identifier for the proof, e.g. a path to a .sp file.
   - (★) `pathToSquirrel`: the path to squirrel's executable.
+
 The LSP supports multiple ongoing proofs, so the `documentId` is necessary to perform any actions on a started proof.
-- `pysquirrellsp/closeProof`: closes a proof. Recognized fields (*: mandatory):
+
+- `pysquirrellsp/closeProof`: closes a proof. Recognized fields (★: mandatory):
   - `id`: a unique identifier for the request (the LSP answers to this command with this `id`).
   - (★) `documentId`: an identifier of a previously started proof.
-- `pysquirrellsp/proofCommand`: interpret a command on a given ongoing proof. Recognized fields (*: mandatory):
+- `pysquirrellsp/proofCommand`: interpret a command on a given ongoing proof. Recognized fields (★: mandatory):
   - (★) `id`: a unique identifier for the request (the LSP answers to this command with this `id`).
   - (★) `documentId`: the identifier of the proof on which the command is interpreted.
   - (★) `proofCommand`: the squirrel command to interpret.
