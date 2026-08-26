@@ -117,7 +117,7 @@ squirrelOutputBlockBeginnings = ['[' + kind + '>' for kind in squirrelOutputKind
 def parseSquirrelOutput(squirrelOutputContent : str) -> list[tuple[str, str]] :
   """ Parses `squirrelOutputContent`. This string must end with a `squirrelInputIndicator`.
     The syntax parsed is the following:
-    "[kind>" with `kind` a valid squirrel output kind starts a block;
+    "[kind>", with `kind` a valid squirrel output kind, starts a block;
     "<]" ends a block
     `squirrelInputIndicator` also ends a block
     Returns a list of blocks present in output, in the form (kind, payload). """
@@ -175,15 +175,6 @@ def parseSquirrelOutput(squirrelOutputContent : str) -> list[tuple[str, str]] :
   else :
     lastKind = "response"
   lastPayload = buf[:-len(squirrelInputIndicator)]
-  # if lastPayload[:len(ANSIEscape)] == ANSIEscape :
-  #   i = len(ANSIEscape)
-  #   if lastPayload[i] == '[' :
-  #     i += 1
-  #     while i < len(lastPayload) and lastPayload[i] != "m" :
-  #       senderr({"method": "pysquirrellsp/debug", "data": "HEY"})
-  #       i += 1
-  #     if i == len(lastPayload) - 1 :
-  #       lastPayload = None
   if lastPayload is not None :
     res.append((lastKind, lastPayload))
   return res
@@ -272,19 +263,21 @@ def mainRoutine() -> None :
         # if DEBUG_MODE :
         #   senderr({"method":"pysquirrellsp/debug", "data":f"path to squirrel received! \"{data["pathToSquirrel"]}\""})
         squirrelPath = data["pathToSquirrel"]
-      request_id : int = data["id"]
-      # TODO error management, display message "maybe wrong path to squirrel"
-      # Spawning a squirrel instance
-      if "documentId" not in data :
-        senderr({"method": "pysquirrellsp/lsperror", "data": "No document id received, proof is not started."})
+      if "id" not in data :
+        senderr({"method": "pysquirrellsp/lsperror", "data": "No id in pysquirrellsp/startProof request."})
       else :
-        documentId = data["documentId"]
-        newProofState = ProofState(documentId, squirrelPath)
-        if newProofState.failedSquirrelStartup :
-          senderr({"method": "pysquirrellsp/lsperror", "failStartup": documentId, "data": "failed squirrel's startup, did you correctly configure squirrel's path ?"})
+        request_id = data["id"]
+        # Spawning a squirrel instance
+        if "documentId" not in data :
+          senderr({"method": "pysquirrellsp/lsperror", "data": "No document id received, proof is not started."})
         else :
-          proofStates[documentId] = newProofState
-          newProofState.transmitSquirrelOutput(request_id, startSquirrelTag = True)
+          documentId = data["documentId"]
+          newProofState = ProofState(documentId, squirrelPath)
+          if newProofState.failedSquirrelStartup :
+            senderr({"method": "pysquirrellsp/lsperror", "failStartup": documentId, "data": "failed squirrel's startup, did you correctly configure squirrel's path ?"})
+          else :
+            proofStates[documentId] = newProofState
+            newProofState.transmitSquirrelOutput(request_id, startSquirrelTag = True)
     elif data["method"] == "pysquirrellsp/closeProof" :
       if "documentId" not in data :
         senderr({"method": "pysquirrellsp/lsperror", "data": "No document id received, proof is not closed."})
@@ -314,7 +307,7 @@ def mainRoutine() -> None :
             if "id" not in data :
               senderr({"method": "pysquirrellsp/lsperror", "data": "No id in pysquirrellsp/proofCommand request."})
             else :
-              request_id = data["id"] # TODO wrap in a state dictionary
+              request_id = data["id"]
             moveCursor : bool = False
             if "moveCursor" in data :
               moveCursor = True
