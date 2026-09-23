@@ -6,6 +6,8 @@ import subprocess
 
 squirrelPath = "squirrel"
 
+communicationEncoding = "utf-8"
+
 DEBUG_MODE : bool = True
 
 ## COMMUNICATION WITH LSP CLIENT
@@ -15,13 +17,13 @@ def send(data : str, end : str | None = "\n") -> None :
   if end == None :
     end = ""
   assert(isinstance(end, str))
-  utf8Data = (data + end).encode(encoding="utf-8")
+  utf8Data = (data + end).encode(encoding=communicationEncoding)
   # Computing LSP header
   size = len(utf8Data)
   contentLengthHeaderField = f"Content-Length: {size}\r\n"
   header = contentLengthHeaderField
   # Sending
-  sys.stdout.buffer.write((header + "\r\n").encode(encoding="utf-8") + utf8Data)
+  sys.stdout.buffer.write((header + "\r\n").encode(encoding=communicationEncoding) + utf8Data)
   sys.stdout.flush()
 
 def senderr(dataJSON : dict, end : str | None = "\n") -> None : 
@@ -30,13 +32,13 @@ def senderr(dataJSON : dict, end : str | None = "\n") -> None :
     end = ""
   assert(isinstance(end, str))
   data : str = (json.dumps(dataJSON) + end)
-  utf8Data = data.encode(encoding="utf-8")
+  utf8Data = data.encode(encoding=communicationEncoding)
   # Computing LSP header
   size = len(utf8Data)
   contentLengthHeaderField = f"Content-Length: {size}\r\n"
   header = contentLengthHeaderField
   # Sending
-  sys.stderr.buffer.write((header + "\r\n").encode(encoding="utf-8") + utf8Data)
+  sys.stderr.buffer.write((header + "\r\n").encode(encoding=communicationEncoding) + utf8Data)
   sys.stderr.flush()
 
 def LSPAnswerQuery(id : Any, msg : str, documentId : str, method : str | None = None, kind : str | None = None, resetResponses : bool = True, continuing : bool = False, commandFailed : bool = False, startSquirrel : bool = False, moveCursor : bool = False) -> None :
@@ -70,19 +72,20 @@ def remove_trailing_nl_cr(s : str) -> str :
 
 def recv() -> str :
   """ Receives a line from the client (via pipe on stdout/stdin). """
-  return remove_trailing_nl_cr(sys.stdin.readline())
+  return remove_trailing_nl_cr(sys.stdin.buffer.readline().decode(encoding=communicationEncoding))
 
-def recv_until(n : int) -> str :
-  """ Receives data until there are exactly [n] characters received, corresponding to `stdin` specified encoding. """
-  # sys.stdin.read
-  return sys.stdin.read(n)
+# def recv_until(n : int) -> str :
+#   """ Receives data until there are exactly [n] characters received, corresponding to `stdin` specified encoding. """
+#   # sys.stdin.read
+#   return sys.stdin.read(n)
 
 def recv_bytes_until(n : int) -> bytes :
   """ Receives data character by character, following `stdin` encoding, until at least [n] bytes received. """
-  buf : bytes = b""
-  while len(buf) < n :
-    buf += bytes(sys.stdin.read(1), encoding="utf-8")
-  return buf
+  # buf : bytes = b""
+  # while len(buf) < n :
+  #   buf += bytes(sys.stdin.read(1), encoding=communicationEncoding)
+  # return buf
+  return sys.stdin.buffer.read(n)
 
 def LSPRecv() -> dict[Any, Any] :
   """ Receives a LSP request, returns a dictionary containg the JSON received. """
@@ -102,7 +105,7 @@ def LSPRecv() -> dict[Any, Any] :
     senderr({"method": "pysquirrellsp/debug", "data": "No field Content-Length in request header."})
     raise ValueError
   payload_bytes : bytes = recv_bytes_until(content_length)
-  payload : str = payload_bytes.decode(encoding = "utf-8")
+  payload : str = payload_bytes.decode(encoding = communicationEncoding)
   try :
     parsed_payload = json.loads(payload)
   except json.decoder.JSONDecodeError as error :
