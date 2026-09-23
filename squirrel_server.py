@@ -73,8 +73,16 @@ def recv() -> str :
   return remove_trailing_nl_cr(sys.stdin.readline())
 
 def recv_until(n : int) -> str :
-  """ Receives data until there are exactly [n] bytes received. """
+  """ Receives data until there are exactly [n] characters received, corresponding to `stdin` specified encoding. """
+  # sys.stdin.read
   return sys.stdin.read(n)
+
+def recv_bytes_until(n : int) -> bytes :
+  """ Receives data character by character, following `stdin` encoding, until at least [n] bytes received. """
+  buf : bytes = b""
+  while len(buf) < n :
+    buf += bytes(sys.stdin.read(1), encoding="utf-8")
+  return buf
 
 def LSPRecv() -> dict[Any, Any] :
   """ Receives a LSP request, returns a dictionary containg the JSON received. """
@@ -93,8 +101,15 @@ def LSPRecv() -> dict[Any, Any] :
   if content_length < 0 :
     senderr({"method": "pysquirrellsp/debug", "data": "No field Content-Length in request header."})
     raise ValueError
-  payload : str = recv_until(content_length)
-  parsed_payload = json.loads(payload)
+  payload_bytes : bytes = recv_bytes_until(content_length)
+  payload : str = payload_bytes.decode(encoding = "utf-8")
+  try :
+    parsed_payload = json.loads(payload)
+  except json.decoder.JSONDecodeError as error :
+    with open("/home/zach/Documents/squirrel/outLSP.txt", "w") as f :
+      f.write(payload)
+    senderr({"method": "pysquirrellsp/lsperror", "data": f"Couldn't decode json:\n========================================\n{payload}\n========================================\nmsg: {error.msg}\ndoc: {error.doc}\npos: {error.pos}"})
+    raise ValueError
   assert(isinstance(parsed_payload, dict))
   return parsed_payload
 
@@ -250,7 +265,10 @@ proofStates : dict[str, ProofState] = {}
 ## LSP SERVER ROUTINE
 
 def mainRoutine() -> None :
-  data = LSPRecv()
+  try :
+    data = LSPRecv()
+  except ValueError :
+    return
   if "method" not in data :
     senderr({"method": "pysquirrellsp/lsperror", "data": "No method field in message."})
   else :
