@@ -127,7 +127,6 @@ squirrelOutputKinds = ["error", "warning", "goal", "start"]
 squirrelOutputBlockBeginnings = ['[' + kind + '>' for kind in squirrelOutputKinds]
 
 # What I understand of squirrel's interactive mode syntax:
-# TODO take it fully into account: everything except [goal] should appear at the bottom-right of the screen.
 # [kind>Sigma* : kind message with e.g. kind=start/warning/goal/error
 # [> Indicates that it's waiting for user input
 # <] seems to indicate the end of a block, allowing to have multiple kind of messages in a single output.
@@ -213,7 +212,6 @@ class ProofState :
       self.failedSquirrelStartup = False    
     except :
       self.failedSquirrelStartup = True
-    # TODO error management on Popen
 
   def processCommand(self, cmd : bytes) :
     assert self.squirrelInstance.stdin is not None
