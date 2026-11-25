@@ -15,6 +15,7 @@ The server supports the following requests:
   - (★) `id`: a unique identifier for the request (the LSP answers to this command with this `id`).
   - (★) `documentId`: an identifier for the proof, e.g. a path to a .sp file.
   - (★) `pathToSquirrel`: the path to squirrel's executable.
+  - `proofWorkingDirectory`: a path to a folder used as working directory for the spawned squirrel instange (e.g. included Squirrel files will be fetched from this directory).
 
 The LSP supports multiple ongoing proofs, so the `documentId` is necessary to perform any actions on a started proof.
 
