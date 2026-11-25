@@ -204,11 +204,14 @@ class ProofState :
   squirrelInstance : subprocess.Popen
   failedSquirrelStartup : bool
 
-  def __init__(self, documentId : str, squirrelPath : str = "squirrel") :
+  def __init__(self, documentId : str, squirrelPath : str = "squirrel", squirrel_wd : str | None = None) :
     self.documentId = documentId
     self.squirrelPath = squirrelPath
     try :
-      self.squirrelInstance = subprocess.Popen([squirrelPath, "-i"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+      if squirrel_wd is None :
+        self.squirrelInstance = subprocess.Popen([squirrelPath, "-i"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+      else :
+        self.squirrelInstance = subprocess.Popen([squirrelPath, "-i"], cwd=squirrel_wd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
       self.failedSquirrelStartup = False    
     except :
       self.failedSquirrelStartup = True
@@ -290,8 +293,11 @@ def mainRoutine() -> None :
         if "documentId" not in data :
           senderr({"method": "pysquirrellsp/lsperror", "data": "No document id received, proof is not started."})
         else :
+          proof_working_directory : str | None = None
+          if "proofWorkingDirectory" in data :
+            proof_working_directory = data["proofWorkingDirectory"]
           documentId = data["documentId"]
-          newProofState = ProofState(documentId, squirrelPath)
+          newProofState = ProofState(documentId, squirrelPath, squirrel_wd=proof_working_directory)
           if newProofState.failedSquirrelStartup :
             senderr({"method": "pysquirrellsp/lsperror", "failStartup": documentId, "data": "failed squirrel's startup, did you correctly configure squirrel's path ?"})
           else :
